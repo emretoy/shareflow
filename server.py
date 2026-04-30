@@ -67,6 +67,11 @@ class ShareFlowServer:
         self._pending_dx = 0
         self._pending_dy = 0
 
+        # Ctrl+Ctrl çift basma ile geçiş
+        self._ctrl_tap_time = 0       # Son ctrl release zamanı
+        self._ctrl_tap_window = 0.4   # İki ctrl arası max süre (saniye)
+        self._ctrl_was_pressed = False
+
     def start(self):
         """Sunucuyu başlat."""
         port = self.config["port"]
@@ -215,7 +220,8 @@ class ShareFlowServer:
         Quartz.CFRunLoopAddSource(loop, source, Quartz.kCFRunLoopCommonModes)
         Quartz.CGEventTapEnable(tap, True)
 
-        print("[Server] Event tap aktif. Fareyi sağ kenara götürün.")
+        print("[Server] Event tap aktif.")
+        print("[Server] Geçiş: Fareyi sağ kenara götür veya Ctrl+Ctrl çift bas")
         print("[Server] Çıkmak için Ctrl+C")
 
         try:
@@ -241,6 +247,33 @@ class ShareFlowServer:
 
     def _process_event(self, proxy, event_type, event):
         """Event'i işle ve gerekirse client'a gönder."""
+        # Ctrl+Ctrl çift basma algılama (her iki modda da çalışır)
+        if event_type == Quartz.kCGEventFlagsChanged:
+            flags = Quartz.CGEventGetFlags(event)
+            ctrl_pressed = bool(flags & Quartz.kCGEventFlagMaskControl)
+            if self._ctrl_was_pressed and not ctrl_pressed:
+                # Ctrl bırakıldı
+                now = time.time()
+                if now - self._ctrl_tap_time <= self._ctrl_tap_window:
+                    # Çift tap! Geçiş yap
+                    self._ctrl_tap_time = 0
+                    if now - self._last_switch_time >= self._switch_cooldown:
+                        self._last_switch_time = now
+                        if self.active:
+                            # Windows -> Mac
+                            print("[Server] Ctrl+Ctrl -> Mac'e dönüş")
+                            self.active = False
+                            Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+                            return event
+                        else:
+                            # Mac -> Windows
+                            point = Quartz.CGEventGetLocation(event)
+                            self._switch_to_client(int(point.y))
+                            return None
+                else:
+                    self._ctrl_tap_time = now
+            self._ctrl_was_pressed = ctrl_pressed
+
         point = Quartz.CGEventGetLocation(event)
         x, y = int(point.x), int(point.y)
 
