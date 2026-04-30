@@ -172,7 +172,8 @@ class ShareFlowServer:
             print("[Server] Kontrol Mac'e döndü")
             self.active = False
             self._last_switch_time = time.time()
-            # Fareyi sol kenardan döndür
+            # Fareyi göster ve sol kenardan döndür
+            Quartz.CGDisplayShowCursor(Quartz.CGMainDisplayID())
             y = int(self.screen_h * msg.get("y_ratio", 0.5))
             Quartz.CGWarpMouseCursorPosition((self.screen_w - 20, y))
             Quartz.CGAssociateMouseAndMouseCursorPosition(True)
@@ -263,6 +264,7 @@ class ShareFlowServer:
                             # Windows -> Mac
                             print("[Server] Ctrl+Ctrl -> Mac'e dönüş")
                             self.active = False
+                            Quartz.CGDisplayShowCursor(Quartz.CGMainDisplayID())
                             Quartz.CGAssociateMouseAndMouseCursorPosition(True)
                             return event
                         else:
@@ -310,6 +312,7 @@ class ShareFlowServer:
         self.active = True
         # Fareyi Mac'te gizle/kilitle
         Quartz.CGAssociateMouseAndMouseCursorPosition(False)
+        Quartz.CGDisplayHideCursor(Quartz.CGMainDisplayID())
         # Fareyi ekranın ortasına taşı ki kenarda takılmasın
         Quartz.CGWarpMouseCursorPosition((self.screen_w // 2, self.screen_h // 2))
 
