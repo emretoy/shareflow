@@ -13,7 +13,7 @@ import threading
 import time
 
 from pynput.mouse import Controller as MouseController, Button
-from pynput.keyboard import Controller as KeyboardController, Key, KeyCode, Listener as KeyboardListener
+from pynput.keyboard import Controller as KeyboardController, Key, KeyCode
 
 from clipboard import ClipboardMonitor
 from config import load_config
@@ -143,10 +143,6 @@ class ShareFlowClient:
         self._last_switch_time = 0
         self._switch_cooldown = 0.5
 
-        # Ctrl+Ctrl çift basma ile geçiş (Windows -> Mac)
-        self._ctrl_tap_time = 0
-        self._ctrl_tap_window = 0.4
-        self._listening_hotkey = False
 
         # Clipboard
         self.clipboard = ClipboardMonitor(self._on_clipboard_change)
@@ -182,9 +178,6 @@ class ShareFlowClient:
         # Clipboard başlat
         if self.config["clipboard_sync"]:
             self.clipboard.start()
-
-        # Ctrl+Ctrl hotkey dinleyici başlat
-        self._start_hotkey_listener()
 
         # Mesajları dinle
         self._receive_loop()
@@ -339,25 +332,6 @@ class ShareFlowClient:
         content = msg.get("content", "")
         self.clipboard.set_clipboard(content)
         print(f"[Clipboard] Alındı ({len(content)} karakter)")
-
-    def _start_hotkey_listener(self):
-        """Ctrl+Ctrl çift basma dinleyicisi başlat."""
-        def on_release(key):
-            if key == Key.ctrl_l or key == Key.ctrl_r:
-                now = time.time()
-                if now - self._ctrl_tap_time <= self._ctrl_tap_window:
-                    # Çift tap! Mac'e dön
-                    self._ctrl_tap_time = 0
-                    if now - self._last_switch_time >= self._switch_cooldown:
-                        self._last_switch_time = now
-                        cx, cy = self.mouse.position
-                        self._switch_back_to_server(cy)
-                else:
-                    self._ctrl_tap_time = now
-
-        listener = KeyboardListener(on_release=on_release)
-        listener.daemon = True
-        listener.start()
 
     def _switch_back_to_server(self, y: int):
         """Kontrolü Mac'e geri ver."""
