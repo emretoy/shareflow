@@ -1,0 +1,3 @@
+pynput
+pyperclip
+pyobjc-framework-Quartz  # sadece Mac (server)
