@@ -17,6 +17,7 @@ from pynput.keyboard import Controller as KeyboardController, Key
 
 from clipboard import ClipboardMonitor
 from config import load_config
+from discovery import discover_server
 from file_transfer import FileReceiver
 from protocol import send_message, read_message, switch_back, clipboard_msg
 
@@ -299,19 +300,30 @@ class ShareFlowClient:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Kullanım: python client.py <server_ip>")
-        print("Örnek:    python client.py 192.168.1.231")
-        sys.exit(1)
-
-    server_host = sys.argv[1]
-
     print("=" * 50)
     print("  ShareFlow Client (Windows)")
     print("=" * 50)
 
-    client = ShareFlowClient(server_host)
-    client.connect()
+    if len(sys.argv) >= 2:
+        server_host = sys.argv[1]
+    else:
+        # Otomatik keşif
+        print("[Client] Server IP verilmedi, otomatik aranıyor...")
+        result = discover_server(timeout=30)
+        if result is None:
+            print("[Client] Server bulunamadı. IP ile deneyin:")
+            print("  python client.py <server_ip>")
+            sys.exit(1)
+        server_host = result["host"]
+
+    while True:
+        client = ShareFlowClient(server_host)
+        try:
+            client.connect()
+        except (ConnectionRefusedError, ConnectionResetError, OSError) as e:
+            print(f"[Client] Bağlantı hatası: {e}")
+        print("[Client] 5 saniye sonra tekrar bağlanılacak...")
+        time.sleep(5)
 
 
 if __name__ == "__main__":

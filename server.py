@@ -16,6 +16,7 @@ from pynput import keyboard, mouse
 
 from clipboard import ClipboardMonitor
 from config import load_config
+from discovery import DiscoveryBroadcaster
 from file_transfer import send_file, FileReceiver
 from protocol import (
     send_message, read_message,
@@ -69,13 +70,25 @@ class ShareFlowServer:
     def start(self):
         """Sunucuyu başlat."""
         port = self.config["port"]
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((self.config["host"], port))
-        srv.listen(1)
+        self.srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.srv.bind((self.config["host"], port))
+        self.srv.listen(1)
         print(f"[Server] Port {port} üzerinde bekleniyor...")
 
-        conn, addr = srv.accept()
+        # Auto-discovery broadcast başlat
+        self.discovery = DiscoveryBroadcaster(port)
+        self.discovery.start()
+
+        # İlk bağlantıyı kabul et
+        self._accept_client()
+
+        # CGEvent tap ile input yakalama (ana thread'de çalışır)
+        self._start_event_tap()
+
+    def _accept_client(self):
+        """Client bağlantısını kabul et."""
+        conn, addr = self.srv.accept()
         print(f"[Server] Bağlantı: {addr}")
 
         if self.config["ssl_enabled"]:
@@ -84,6 +97,8 @@ class ShareFlowServer:
             conn = ctx.wrap_socket(conn, server_side=True)
 
         self.client_sock = conn
+        self.active = False
+        self.running = True
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         conn.settimeout(0.5)
 
@@ -105,9 +120,6 @@ class ShareFlowServer:
         recv_thread = threading.Thread(target=self._receive_loop, daemon=True)
         recv_thread.start()
 
-        # CGEvent tap ile input yakalama
-        self._start_event_tap()
-
     def _on_clipboard_change(self, content: str):
         """Clipboard değişince client'a gönder."""
         if self.client_sock:
@@ -123,16 +135,29 @@ class ShareFlowServer:
             try:
                 msg = read_message(self.client_sock)
                 if msg is None:
-                    print("[Server] Bağlantı kapandı")
-                    self.running = False
+                    print("[Server] Bağlantı kapandı, yeniden bekleniyor...")
+                    self._reconnect()
                     break
                 self._handle_client_msg(msg)
             except socket.timeout:
                 continue
             except Exception as e:
                 print(f"[Server] Alma hatası: {e}")
-                self.running = False
+                self._reconnect()
                 break
+
+    def _reconnect(self):
+        """Bağlantı kopunca yeniden kabul et."""
+        self.active = False
+        Quartz.CGAssociateMouseAndMouseCursorPosition(True)
+        self.clipboard.stop()
+        try:
+            self.client_sock.close()
+        except Exception:
+            pass
+        self.client_sock = None
+        # Yeni bağlantı bekle (ayrı thread)
+        threading.Thread(target=self._accept_client, daemon=True).start()
 
     def _handle_client_msg(self, msg: dict):
         """Client'tan gelen mesajı işle."""
@@ -198,6 +223,7 @@ class ShareFlowServer:
         except KeyboardInterrupt:
             print("\n[Server] Kapatılıyor...")
             self.running = False
+            self.discovery.stop()
             if self.client_sock:
                 self.client_sock.close()
             self.clipboard.stop()
