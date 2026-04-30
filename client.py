@@ -13,7 +13,7 @@ import threading
 import time
 
 from pynput.mouse import Controller as MouseController, Button
-from pynput.keyboard import Controller as KeyboardController, Key, KeyCode
+from pynput.keyboard import Controller as KeyboardController, Key
 
 from clipboard import ClipboardMonitor
 from config import load_config
@@ -22,7 +22,8 @@ from file_transfer import FileReceiver
 from protocol import send_message, read_message, switch_back, clipboard_msg
 
 
-# Windows API - ekran boyutu
+# --- Windows API ---
+
 def get_screen_size():
     """Windows ekran çözünürlüğünü al."""
     try:
@@ -33,81 +34,167 @@ def get_screen_size():
         return 1920, 1080
 
 
-# Mac keycode -> Windows Virtual Key code eşlemesi
-# Fiziksel tuş pozisyonuna göre - klavye diline bağlı değil
-MAC_TO_WIN_VK = {
+# Scancode tabanlı tuş enjeksiyonu - layout'a bağlı değil
+INPUT_KEYBOARD = 1
+KEYEVENTF_SCANCODE = 0x0008
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_EXTENDEDKEY = 0x0001
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [
+        ("ki", KEYBDINPUT),
+        ("mi", MOUSEINPUT),
+    ]
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_ulong),
+        ("union", INPUT_UNION),
+    ]
+
+
+def send_scancode(scan, key_up=False, extended=False):
+    """Windows'a scancode tabanlı tuş event'i gönder."""
+    flags = KEYEVENTF_SCANCODE
+    if key_up:
+        flags |= KEYEVENTF_KEYUP
+    if extended:
+        flags |= KEYEVENTF_EXTENDEDKEY
+    inp = INPUT()
+    inp.type = INPUT_KEYBOARD
+    inp.union.ki.wScan = scan
+    inp.union.ki.dwFlags = flags
+    try:
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception:
+        pass
+
+
+# Mac keycode -> Windows Scancode (Set 1)
+# Fiziksel tuş pozisyonu - her iki OS'te de aynı tuşa karşılık gelir
+MAC_TO_SCANCODE = {
     # Harfler
-    0: 0x41,   # A
-    1: 0x53,   # S
-    2: 0x44,   # D
-    3: 0x46,   # F
-    4: 0x48,   # H
-    5: 0x47,   # G
-    6: 0x5A,   # Z
-    7: 0x58,   # X
-    8: 0x43,   # C
-    9: 0x56,   # V
-    11: 0x42,  # B
-    12: 0x51,  # Q
-    13: 0x57,  # W
-    14: 0x45,  # E
-    15: 0x52,  # R
-    16: 0x59,  # Y
-    17: 0x54,  # T
-    31: 0x4F,  # O
-    32: 0x55,  # U
-    34: 0x49,  # I
-    35: 0x50,  # P
-    37: 0x4C,  # L
-    38: 0x4A,  # J
-    40: 0x4B,  # K
-    45: 0x4E,  # N
-    46: 0x4D,  # M
+    0: 0x1E,   # A
+    1: 0x1F,   # S
+    2: 0x20,   # D
+    3: 0x21,   # F
+    4: 0x23,   # H
+    5: 0x22,   # G
+    6: 0x2C,   # Z
+    7: 0x2D,   # X
+    8: 0x2E,   # C
+    9: 0x2F,   # V
+    11: 0x30,  # B
+    12: 0x10,  # Q
+    13: 0x11,  # W
+    14: 0x12,  # E
+    15: 0x13,  # R
+    16: 0x15,  # Y
+    17: 0x14,  # T
+    31: 0x18,  # O
+    32: 0x16,  # U
+    34: 0x17,  # I
+    35: 0x19,  # P
+    37: 0x26,  # L
+    38: 0x24,  # J
+    40: 0x25,  # K
+    45: 0x31,  # N
+    46: 0x32,  # M
     # Rakamlar
-    18: 0x31,  # 1
-    19: 0x32,  # 2
-    20: 0x33,  # 3
-    21: 0x34,  # 4
-    22: 0x36,  # 6
-    23: 0x35,  # 5
-    25: 0x39,  # 9
-    26: 0x37,  # 7
-    28: 0x38,  # 8
-    29: 0x30,  # 0
+    18: 0x02,  # 1
+    19: 0x03,  # 2
+    20: 0x04,  # 3
+    21: 0x05,  # 4
+    22: 0x07,  # 6
+    23: 0x06,  # 5
+    25: 0x0A,  # 9
+    26: 0x08,  # 7
+    28: 0x09,  # 8
+    29: 0x0B,  # 0
     # Semboller
-    24: 0xBB,  # =
-    27: 0xBD,  # -
-    30: 0xDD,  # ]
-    33: 0xDB,  # [
-    39: 0xDE,  # '
-    41: 0xBA,  # ;
-    42: 0xDC,  # backslash
-    43: 0xBC,  # ,
-    44: 0xBF,  # /
-    47: 0xBE,  # .
-    50: 0xC0,  # `
+    24: 0x0D,  # =/+
+    27: 0x0C,  # -/_
+    30: 0x1B,  # ]/}
+    33: 0x1A,  # [/{
+    39: 0x28,  # '/"
+    41: 0x27,  # ;/:  (Türkçe: ş)
+    42: 0x2B,  # backslash
+    43: 0x33,  # ,/<  (Türkçe: ö)
+    44: 0x35,  # //?
+    47: 0x34,  # ./>  (Türkçe: ç)
+    50: 0x29,  # `/~
+    10: 0x56,  # § / < (ISO key)
 }
 
-# Mac keycode -> pynput özel tuş eşlemesi
-MAC_SPECIAL_KEYS = {
-    36: Key.enter,
-    48: Key.tab,
-    49: Key.space,
-    51: Key.backspace,
-    53: Key.esc,
-    76: Key.enter,
-    117: Key.delete,
-    123: Key.left,
-    124: Key.right,
-    125: Key.down,
-    126: Key.up,
-    116: Key.page_up,
-    121: Key.page_down,
-    115: Key.home,
-    119: Key.end,
-    122: Key.f1, 120: Key.f2, 99: Key.f3, 118: Key.f4,
-    96: Key.f5, 97: Key.f6, 98: Key.f7, 100: Key.f8,
-    101: Key.f9, 109: Key.f10, 103: Key.f11, 111: Key.f12,
+# Extended scancode gerektiren tuşlar
+MAC_EXTENDED_SCANCODE = {
+    123: 0x4B,  # Left arrow
+    124: 0x4D,  # Right arrow
+    125: 0x50,  # Down arrow
+    126: 0x48,  # Up arrow
+    116: 0x49,  # Page Up
+    121: 0x51,  # Page Down
+    115: 0x47,  # Home
+    119: 0x4F,  # End
+    117: 0x53,  # Delete (forward)
+}
+
+# Normal (non-extended) özel tuşlar
+MAC_SPECIAL_SCANCODE = {
+    36: 0x1C,  # Enter
+    48: 0x0F,  # Tab
+    49: 0x39,  # Space
+    51: 0x0E,  # Backspace
+    53: 0x01,  # Escape
+    76: 0x1C,  # Numpad Enter (extended)
+    # F tuşları
+    122: 0x3B,  # F1
+    120: 0x3C,  # F2
+    99: 0x3D,   # F3
+    118: 0x3E,  # F4
+    96: 0x3F,   # F5
+    97: 0x40,   # F6
+    98: 0x41,   # F7
+    100: 0x42,  # F8
+    101: 0x43,  # F9
+    109: 0x44,  # F10
+    103: 0x57,  # F11
+    111: 0x58,  # F12
+}
+
+# Modifier tuşları scancode
+MAC_MODIFIER_SCANCODE = {
+    56: 0x2A,   # Left Shift
+    60: 0x36,   # Right Shift
+    59: 0x1D,   # Left Ctrl
+    62: 0x1D,   # Right Ctrl (extended)
+    58: 0x38,   # Left Alt/Option
+    61: 0x38,   # Right Alt (extended)
+    55: 0x1D,   # Left Cmd -> Ctrl
+    54: 0x1D,   # Right Cmd -> Ctrl (extended)
 }
 
 BUTTON_MAP = {
@@ -276,54 +363,52 @@ class ShareFlowClient:
         self.mouse.scroll(msg.get("dx", 0), msg.get("dy", 0))
 
     def _handle_key(self, msg: dict):
-        """Tuş basma/bırakma - keycode tabanlı."""
+        """Tuş basma/bırakma - scancode tabanlı."""
         action = msg["action"]
         keycode = msg.get("keycode")
+        key_up = action == "release"
 
         if keycode is None:
             return
 
-        # Özel tuşlar (enter, tab, ok tuşları vb.)
-        if keycode in MAC_SPECIAL_KEYS:
-            key_obj = MAC_SPECIAL_KEYS[keycode]
-        # Normal tuşlar - VK code ile
-        elif keycode in MAC_TO_WIN_VK:
-            vk = MAC_TO_WIN_VK[keycode]
-            key_obj = KeyCode.from_vk(vk)
+        # Normal tuşlar (harfler, rakamlar, semboller)
+        if keycode in MAC_TO_SCANCODE:
+            send_scancode(MAC_TO_SCANCODE[keycode], key_up=key_up)
+        # Özel tuşlar (enter, tab, space, F tuşları vb.)
+        elif keycode in MAC_SPECIAL_SCANCODE:
+            send_scancode(MAC_SPECIAL_SCANCODE[keycode], key_up=key_up)
+        # Extended tuşlar (ok tuşları, home, end vb.)
+        elif keycode in MAC_EXTENDED_SCANCODE:
+            send_scancode(MAC_EXTENDED_SCANCODE[keycode], key_up=key_up, extended=True)
+        # Modifier tuşları
+        elif keycode in MAC_MODIFIER_SCANCODE:
+            extended = keycode in (62, 61, 54)  # Sağ ctrl, sağ alt, sağ cmd
+            send_scancode(MAC_MODIFIER_SCANCODE[keycode], key_up=key_up, extended=extended)
         else:
             print(f"[Client] Bilinmeyen keycode: {keycode}")
-            return
-
-        try:
-            if action == "press":
-                self.keyboard.press(key_obj)
-            else:
-                self.keyboard.release(key_obj)
-        except Exception as e:
-            print(f"[Client] Tuş hatası: keycode {keycode} -> {e}")
 
     def _handle_modifiers(self, msg: dict):
-        """Modifier durum güncelleme."""
+        """Modifier durum güncelleme - scancode tabanlı."""
         new_state = msg.get("state", {})
 
-        # cmd -> ctrl mapping
-        key_mapping = {
-            "shift": Key.shift,
-            "ctrl": Key.ctrl,
-            "alt": Key.alt,
-            "cmd": Key.ctrl,  # Mac cmd = Win ctrl
+        # Modifier -> scancode + extended flag
+        mod_mapping = {
+            "shift": (0x2A, False),   # Left Shift
+            "ctrl":  (0x1D, False),   # Left Ctrl
+            "alt":   (0x38, False),   # Left Alt
+            "cmd":   (0x1D, False),   # Cmd -> Ctrl
         }
 
         for mod, pressed in new_state.items():
             was_pressed = self._modifiers.get(mod, False)
+            mapping = mod_mapping.get(mod)
+            if mapping is None:
+                continue
+            scan, extended = mapping
             if pressed and not was_pressed:
-                win_key = key_mapping.get(mod)
-                if win_key:
-                    self.keyboard.press(win_key)
+                send_scancode(scan, key_up=False, extended=extended)
             elif not pressed and was_pressed:
-                win_key = key_mapping.get(mod)
-                if win_key:
-                    self.keyboard.release(win_key)
+                send_scancode(scan, key_up=True, extended=extended)
 
         self._modifiers = new_state
 
@@ -343,11 +428,9 @@ class ShareFlowClient:
             print(f"[Client] Geri dönüş hatası: {e}")
 
         # Tüm modifier'ları bırak
-        for key in (Key.shift, Key.ctrl, Key.alt):
-            try:
-                self.keyboard.release(key)
-            except Exception:
-                pass
+        send_scancode(0x2A, key_up=True)   # Shift
+        send_scancode(0x1D, key_up=True)   # Ctrl
+        send_scancode(0x38, key_up=True)   # Alt
         self._modifiers = {"shift": False, "ctrl": False, "alt": False, "cmd": False}
 
 
