@@ -347,22 +347,39 @@ class ShareFlowServer:
         return None
 
     def _get_key_string(self, event, keycode: int) -> str:
-        """CGEvent'ten tuş adını çıkar."""
-        # Özel tuşlar
-        special_keys = {
+        """CGEvent'ten tuş adını çıkar. Keycode tabanlı - klavye diline bağlı değil."""
+        # Keycode -> fiziksel tuş eşlemesi (Mac keycode -> karakter)
+        KEYCODE_MAP = {
+            # Özel tuşlar
             36: "enter", 48: "tab", 49: "space", 51: "backspace",
-            53: "escape", 76: "enter",  # numpad enter
+            53: "escape", 76: "enter",
             123: "left", 124: "right", 125: "down", 126: "up",
             116: "page_up", 121: "page_down", 115: "home", 119: "end",
-            117: "delete",  # forward delete
+            117: "delete",
             122: "f1", 120: "f2", 99: "f3", 118: "f4",
             96: "f5", 97: "f6", 98: "f7", 100: "f8",
             101: "f9", 109: "f10", 103: "f11", 111: "f12",
+            # Harfler (fiziksel US layout pozisyonları)
+            0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g",
+            6: "z", 7: "x", 8: "c", 9: "v", 11: "b",
+            12: "q", 13: "w", 14: "e", 15: "r", 16: "y", 17: "t",
+            31: "o", 32: "u", 34: "i", 35: "p",
+            37: "l", 38: "j", 40: "k",
+            45: "n", 46: "m",
+            # Rakamlar
+            18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
+            23: "5", 24: "=", 25: "9", 26: "7", 27: "-",
+            28: "8", 29: "0",
+            # Semboller
+            30: "]", 33: "[", 39: "'", 41: ";", 42: "\\",
+            43: ",", 44: "/", 47: ".",
+            50: "`",
         }
-        if keycode in special_keys:
-            return special_keys[keycode]
 
-        # Normal karakter
+        if keycode in KEYCODE_MAP:
+            return KEYCODE_MAP[keycode]
+
+        # Bilinmeyen keycode - NSEvent'ten almayı dene
         try:
             ns_event = Quartz.NSEvent.eventWithCGEvent_(event)
             if ns_event:
