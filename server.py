@@ -357,14 +357,16 @@ class ShareFlowServer:
             elif event_type == Quartz.kCGEventKeyDown:
                 keycode = Quartz.CGEventGetIntegerValueField(
                     event, Quartz.kCGKeyboardEventKeycode)
-                chars = self._get_key_string(event, keycode)
-                send_message(self.client_sock, key_event(chars, "press"))
+                send_message(self.client_sock, {
+                    "type": "key", "keycode": keycode, "action": "press",
+                })
 
             elif event_type == Quartz.kCGEventKeyUp:
                 keycode = Quartz.CGEventGetIntegerValueField(
                     event, Quartz.kCGKeyboardEventKeycode)
-                chars = self._get_key_string(event, keycode)
-                send_message(self.client_sock, key_event(chars, "release"))
+                send_message(self.client_sock, {
+                    "type": "key", "keycode": keycode, "action": "release",
+                })
 
             elif event_type == Quartz.kCGEventFlagsChanged:
                 flags = Quartz.CGEventGetFlags(event)

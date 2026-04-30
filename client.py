@@ -13,7 +13,7 @@ import threading
 import time
 
 from pynput.mouse import Controller as MouseController, Button
-from pynput.keyboard import Controller as KeyboardController, Key, Listener as KeyboardListener
+from pynput.keyboard import Controller as KeyboardController, Key, KeyCode, Listener as KeyboardListener
 
 from clipboard import ClipboardMonitor
 from config import load_config
@@ -33,25 +33,81 @@ def get_screen_size():
         return 1920, 1080
 
 
-# Tuş eşleme: Mac key string -> pynput Key
-SPECIAL_KEYS = {
-    "enter": Key.enter,
-    "tab": Key.tab,
-    "space": Key.space,
-    "backspace": Key.backspace,
-    "escape": Key.esc,
-    "delete": Key.delete,
-    "left": Key.left,
-    "right": Key.right,
-    "up": Key.up,
-    "down": Key.down,
-    "page_up": Key.page_up,
-    "page_down": Key.page_down,
-    "home": Key.home,
-    "end": Key.end,
-    "f1": Key.f1, "f2": Key.f2, "f3": Key.f3, "f4": Key.f4,
-    "f5": Key.f5, "f6": Key.f6, "f7": Key.f7, "f8": Key.f8,
-    "f9": Key.f9, "f10": Key.f10, "f11": Key.f11, "f12": Key.f12,
+# Mac keycode -> Windows Virtual Key code eşlemesi
+# Fiziksel tuş pozisyonuna göre - klavye diline bağlı değil
+MAC_TO_WIN_VK = {
+    # Harfler
+    0: 0x41,   # A
+    1: 0x53,   # S
+    2: 0x44,   # D
+    3: 0x46,   # F
+    4: 0x48,   # H
+    5: 0x47,   # G
+    6: 0x5A,   # Z
+    7: 0x58,   # X
+    8: 0x43,   # C
+    9: 0x56,   # V
+    11: 0x42,  # B
+    12: 0x51,  # Q
+    13: 0x57,  # W
+    14: 0x45,  # E
+    15: 0x52,  # R
+    16: 0x59,  # Y
+    17: 0x54,  # T
+    31: 0x4F,  # O
+    32: 0x55,  # U
+    34: 0x49,  # I
+    35: 0x50,  # P
+    37: 0x4C,  # L
+    38: 0x4A,  # J
+    40: 0x4B,  # K
+    45: 0x4E,  # N
+    46: 0x4D,  # M
+    # Rakamlar
+    18: 0x31,  # 1
+    19: 0x32,  # 2
+    20: 0x33,  # 3
+    21: 0x34,  # 4
+    22: 0x36,  # 6
+    23: 0x35,  # 5
+    25: 0x39,  # 9
+    26: 0x37,  # 7
+    28: 0x38,  # 8
+    29: 0x30,  # 0
+    # Semboller
+    24: 0xBB,  # =
+    27: 0xBD,  # -
+    30: 0xDD,  # ]
+    33: 0xDB,  # [
+    39: 0xDE,  # '
+    41: 0xBA,  # ;
+    42: 0xDC,  # backslash
+    43: 0xBC,  # ,
+    44: 0xBF,  # /
+    47: 0xBE,  # .
+    50: 0xC0,  # `
+}
+
+# Mac keycode -> pynput özel tuş eşlemesi
+MAC_SPECIAL_KEYS = {
+    36: Key.enter,
+    48: Key.tab,
+    49: Key.space,
+    51: Key.backspace,
+    53: Key.esc,
+    76: Key.enter,
+    117: Key.delete,
+    123: Key.left,
+    124: Key.right,
+    125: Key.down,
+    126: Key.up,
+    116: Key.page_up,
+    121: Key.page_down,
+    115: Key.home,
+    119: Key.end,
+    122: Key.f1, 120: Key.f2, 99: Key.f3, 118: Key.f4,
+    96: Key.f5, 97: Key.f6, 98: Key.f7, 100: Key.f8,
+    101: Key.f9, 109: Key.f10, 103: Key.f11, 111: Key.f12,
 }
 
 BUTTON_MAP = {
@@ -227,28 +283,23 @@ class ShareFlowClient:
         self.mouse.scroll(msg.get("dx", 0), msg.get("dy", 0))
 
     def _handle_key(self, msg: dict):
-        """Tuş basma/bırakma."""
-        key_str = msg["key"]
+        """Tuş basma/bırakma - keycode tabanlı."""
         action = msg["action"]
+        keycode = msg.get("keycode")
 
-        # Modifier tuşları cmd -> ctrl'ye çevir (Mac -> Win)
-        if key_str in ("cmd", "command"):
-            key_obj = Key.ctrl
-        elif key_str == "alt":
-            key_obj = Key.alt
-        elif key_str == "ctrl":
-            key_obj = Key.ctrl
-        elif key_str == "shift":
-            key_obj = Key.shift
-        elif key_str in SPECIAL_KEYS:
-            key_obj = SPECIAL_KEYS[key_str]
+        if keycode is None:
+            return
+
+        # Özel tuşlar (enter, tab, ok tuşları vb.)
+        if keycode in MAC_SPECIAL_KEYS:
+            key_obj = MAC_SPECIAL_KEYS[keycode]
+        # Normal tuşlar - VK code ile
+        elif keycode in MAC_TO_WIN_VK:
+            vk = MAC_TO_WIN_VK[keycode]
+            key_obj = KeyCode.from_vk(vk)
         else:
-            # Normal karakter
-            if len(key_str) == 1:
-                key_obj = key_str
-            else:
-                print(f"[Client] Bilinmeyen tuş: {key_str}")
-                return
+            print(f"[Client] Bilinmeyen keycode: {keycode}")
+            return
 
         try:
             if action == "press":
@@ -256,7 +307,7 @@ class ShareFlowClient:
             else:
                 self.keyboard.release(key_obj)
         except Exception as e:
-            print(f"[Client] Tuş hatası: {key_str} -> {e}")
+            print(f"[Client] Tuş hatası: keycode {keycode} -> {e}")
 
     def _handle_modifiers(self, msg: dict):
         """Modifier durum güncelleme."""
